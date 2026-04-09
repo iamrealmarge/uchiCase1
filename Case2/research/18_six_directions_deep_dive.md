@@ -89,4 +89,17 @@ ALL 6 directions are dead:
 5. **Short side**: Can't change sector allocation without views (which fail GP#29)
 6. **Model ensemble**: Alternatives are 25-33% worse than BL
 
-The investigation was thorough: each direction had a clear hypothesis, quantitative analysis, and definitive conclusion. No hand-waving. The +2.168 submission represents the practical limit of BL-based approaches with 4 views, 5 years of data, and 25 assets.
+## Direction 7: Targeted Per-Sector Alpha (informed by oracle correlation)
+
+**Finding**: Oracle correlation analysis showed S0 (corr=-0.81) and S4 (corr=+0.31) have poor BL allocation, while tick_sr is much better (S0: +0.83, S4: +0.94). This suggests higher alpha for S0 and S4.
+
+**Test**: S0=0.10, S4=0.10, S1=0.02, S2=0.02, S3=0
+**Result via validate.py**: Mean=+2.166, Min=+2.076 — WORSE than current (Mean=+2.167, Min=+2.103)
+
+**Why**: The oracle correlations were computed on FULL SAMPLE. Per-fold, tick SR is noisier and high alpha amplifies fold-level noise. The alpha=0.02 uniform for rest sectors is already the right noise/signal balance.
+
+## Conclusion (Updated)
+
+The investigation was thorough: 7 directions, each with clear hypothesis, quantitative analysis, and definitive conclusion. The information budget analysis revealed WHERE BL is blind (S0: anti-correlated, S4: poorly correlated), but the practical remedy (higher tilt alpha) doesn't improve because fold-level tick SR is too noisy to support higher alpha.
+
+The +2.168 submission represents the practical limit given the noise level at our sample size.
