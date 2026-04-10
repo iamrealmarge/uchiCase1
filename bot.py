@@ -246,6 +246,9 @@ class Case1Bot(XChangeClient):
         self.pe_c    = self.c_pe0 if self.c_pe0 else 14.0
         self.fed_initialized = False  # whether we've read market priors
 
+        # ── Startup: cancel stale orders on first book update ──
+        self.startup_cancel_done = False
+
         # ── Petition state (Fed proxy) ──
         self.petition_cumulative = {}  # asset → cumulative signatures
 
@@ -614,53 +617,54 @@ class Case1Bot(XChangeClient):
         else:
             soft_limit = SOFT_POS_LIMIT_STOCK
 
-        # POSITION GATE (Cycle 18): refuse to place ANY new MM orders when position is
-        # already at or past the soft limit.
-        if abs(pos) >= soft_limit:
-            log.debug(f"POSITION GATE: {symbol} pos={pos} >= soft={soft_limit}, refusing MM orders")
-            return
+        # ONE-SIDED POSITION GATE: instead of killing ALL quotes at soft limit,
+        # only block the ACCUMULATING side. Keep quoting the REDUCING side so we
+        # can unwind via normal MM flow (not just emergency unwind).
+        # This fixes the "11 buys, 0 sells, dead at limit" problem.
+        allow_buy = pos < soft_limit          # block buys at/past soft limit
+        allow_sell = pos > -soft_limit        # block sells at/past negative soft limit
 
-        # HARD STOP thresholds: 80% of soft limit
-        hard_stop_long  = 0.8 * soft_limit   # block buys above this
-        hard_stop_short = -0.8 * soft_limit  # block sells below this
-
+        # At 80% of limit: also tighten the reducing side's edge for faster unwind
+        hard_stop_long  = 0.8 * soft_limit
+        hard_stop_short = -0.8 * soft_limit
+        # If approaching limit, shrink edge on the reducing side to attract fills
+        reducing_edge_mult = 1.0
         if pos >= hard_stop_long:
-            log.debug(f"HARD STOP BUY {symbol}: pos={pos} >= {hard_stop_long:.0f}")
-        if pos <= hard_stop_short:
-            log.debug(f"HARD STOP SELL {symbol}: pos={pos} <= {hard_stop_short:.0f}")
+            allow_buy = False  # hard stop buys
+            reducing_edge_mult = 0.5  # tighter asks to attract sellers
+        elif pos <= hard_stop_short:
+            allow_sell = False  # hard stop sells
+            reducing_edge_mult = 0.5  # tighter bids to attract buyers
 
         # L1: Penny-in — improve on best bid/ask by 1 to capture flow
         bb, _ = self.best_bid(symbol)
         ba, _ = self.best_ask(symbol)
-        penny_size = max(1, MM_SIZE // 2)  # smaller size for aggressive L1
+        penny_size = max(1, MM_SIZE // 2)
 
-        if bb is not None and pos < hard_stop_long:
-            penny_bid = bb + 1  # improve best bid by 1
-            # Don't penny-in above our adjusted fair value
+        if bb is not None and allow_buy:
+            penny_bid = bb + 1
             if penny_bid < int(round(adjusted_fair)):
                 await self.safe_place(symbol, penny_size, "buy", penny_bid)
 
-        if ba is not None and pos > hard_stop_short:
-            penny_ask = ba - 1  # improve best ask by 1
-            # Don't penny-in below our adjusted fair value
+        if ba is not None and allow_sell:
+            penny_ask = ba - 1
             if penny_ask > int(round(adjusted_fair)):
                 await self.safe_place(symbol, penny_size, "sell", penny_ask)
 
-        # L2-L4: Multi-level quotes around adjusted fair value (includes fade + OBI skew)
-        # Uses adaptive edge (Cycle 22): wider spread when we have inventory, tighter when flat
+        # L2+: Multi-level quotes around adjusted fair value
         for level in range(MM_LEVELS - 1):
-            offset = edge + level * MM_LEVEL_STEP  # adaptive edge replaces MM_BASE_EDGE
-            # Size decreases at wider levels
+            offset = edge + level * MM_LEVEL_STEP
             size = max(1, MM_SIZE - level * 2)
 
-            # Bid (buy) side — HARD STOP at 80% of soft limit
+            # Bid (buy) side
             bid_px = int(round(adjusted_fair - offset))
-            if pos < hard_stop_long and bid_px > 0:
+            if allow_buy and bid_px > 0:
                 await self.safe_place(symbol, size, "buy", bid_px)
 
-            # Ask (sell) side — HARD STOP at 80% of soft limit
-            ask_px = int(round(adjusted_fair + offset))
-            if pos > hard_stop_short and ask_px > 0:
+            # Ask (sell) side — tighter edge when unwinding long position
+            ask_offset = offset * reducing_edge_mult if pos > 0 else offset
+            ask_px = int(round(adjusted_fair + ask_offset))
+            if allow_sell and ask_px > 0:
                 await self.safe_place(symbol, size, "sell", ask_px)
 
         # Emergency unwind: if position exceeds 70% of soft limit, aggressively flatten.
@@ -755,33 +759,45 @@ class Case1Bot(XChangeClient):
 
         threshold = ETF_SWAP_FEE + ETF_ARB_EDGE
 
+        # Check component positions before swapping — don't blow past soft limits
+        a_pos = self.positions.get("A", 0)
+        b_pos = self.positions.get("B", 0)
+        c_pos = self.positions.get("C", 0)
+        component_room_long = min(
+            SOFT_POS_LIMIT_STOCK - a_pos,
+            SOFT_POS_LIMIT_STOCK - b_pos,
+            SOFT_POS_LIMIT_STOCK - c_pos
+        )
+        component_room_short = min(
+            SOFT_POS_LIMIT_STOCK + a_pos,
+            SOFT_POS_LIMIT_STOCK + b_pos,
+            SOFT_POS_LIMIT_STOCK + c_pos
+        )
+
         if edge > threshold:
-            # ETF overpriced: sell ETF, then redeem (fromETF)
+            # ETF overpriced: sell ETF, then redeem (fromETF → gives us +A+B+C)
+            # Only swap if components have room to go MORE long
             bb, _ = self.best_bid("ETF")
             if bb is not None and bb - nav > ETF_SWAP_FEE:
                 qty = min(5, self.position_room("ETF", "sell"))
                 if qty > 0:
                     await self.safe_place("ETF", qty, "sell", bb)
-                    # Try swap if we hold ETF
                     etf_pos = self.positions.get("ETF", 0)
-                    if etf_pos > 0:
-                        swap_qty = min(etf_pos, 3)
+                    if etf_pos > 0 and component_room_long > 0:
+                        swap_qty = min(etf_pos, 3, component_room_long)
                         try:
                             await self.place_swap_order("fromETF", swap_qty)
                         except Exception as e:
                             log.warning(f"Swap fromETF failed: {e}")
 
         elif edge < -threshold:
-            # ETF underpriced: buy ETF, then create (toETF) if we hold components
+            # ETF underpriced: buy ETF, then create (toETF → consumes A+B+C)
+            # Only swap if we hold components
             ba, _ = self.best_ask("ETF")
             if ba is not None and nav - ba > ETF_SWAP_FEE:
                 qty = min(5, self.position_room("ETF", "buy"))
                 if qty > 0:
                     await self.safe_place("ETF", qty, "buy", ba)
-                    # Try create swap if we hold all components
-                    a_pos = self.positions.get("A", 0)
-                    b_pos = self.positions.get("B", 0)
-                    c_pos = self.positions.get("C", 0)
                     can_swap = min(a_pos, b_pos, c_pos)
                     if can_swap > 0:
                         swap_qty = min(can_swap, 3)
@@ -1030,6 +1046,14 @@ class Case1Bot(XChangeClient):
 
     async def bot_handle_book_update(self, symbol: str) -> None:
         """Called on every book snapshot and incremental update."""
+
+        # Startup: cancel all stale orders from previous session on first update
+        if not self.startup_cancel_done:
+            for sym in list(self.order_books.keys()):
+                await self.cancel_all_symbol(sym)
+            self.startup_cancel_done = True
+            log.info(f"STARTUP: Cancelled all stale orders across {len(self.order_books)} symbols")
+            return  # skip this tick, start fresh next update
 
         self.tick_count += 1
 
