@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UTC 2026 Case 1 - Grand Strategy Guide</title>
+<style>
+  :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #c9d1d9; --accent: #58a6ff; --green: #3fb950; --red: #f85149; --yellow: #d29922; --purple: #bc8cff; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; padding: 20px; max-width: 1100px; margin: 0 auto; }
+  h1 { color: #fff; font-size: 2em; margin: 30px 0 10px; border-bottom: 2px solid var(--accent); padding-bottom: 10px; }
+  h2 { color: var(--accent); font-size: 1.5em; margin: 25px 0 10px; }
+  h3 { color: var(--purple); font-size: 1.15em; margin: 18px 0 8px; }
+  .hero { background: linear-gradient(135deg, #1a1f35, #0d1117); border: 1px solid var(--accent); border-radius: 12px; padding: 30px; margin-bottom: 30px; text-align: center; }
+  .hero h1 { border: none; margin: 0 0 5px; font-size: 2.2em; }
+  .hero p { color: #8b949e; font-size: 1.1em; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin: 15px 0; }
+  .card.green { border-left: 4px solid var(--green); }
+  .card.red { border-left: 4px solid var(--red); }
+  .card.yellow { border-left: 4px solid var(--yellow); }
+  .card.blue { border-left: 4px solid var(--accent); }
+  .card.purple { border-left: 4px solid var(--purple); }
+  code { background: #1f2937; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; color: var(--green); }
+  pre { background: #1f2937; padding: 15px; border-radius: 6px; overflow-x: auto; margin: 10px 0; font-size: 0.85em; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th, td { padding: 8px 12px; border: 1px solid var(--border); text-align: left; }
+  th { background: #1f2937; color: var(--accent); font-weight: 600; }
+  td { background: var(--card); }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: 600; margin: 0 3px; }
+  .tag-green { background: #1a3a2a; color: var(--green); }
+  .tag-red { background: #3a1a1a; color: var(--red); }
+  .tag-yellow { background: #3a2a1a; color: var(--yellow); }
+  .tag-blue { background: #1a2a3a; color: var(--accent); }
+  .formula { background: #1a1f35; border: 1px solid #30365d; padding: 12px 18px; border-radius: 6px; font-family: 'Courier New', monospace; margin: 10px 0; font-size: 0.95em; color: #e6edf3; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+  @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+  .toc { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin: 20px 0; }
+  .toc a { color: var(--accent); text-decoration: none; display: block; padding: 3px 0; }
+  .toc a:hover { text-decoration: underline; }
+  .param-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .param-name { font-weight: 600; color: var(--green); }
+  .param-val { color: #fff; font-family: monospace; }
+  .param-note { color: #8b949e; font-size: 0.85em; }
+  .timeline { border-left: 3px solid var(--accent); padding-left: 20px; margin: 15px 0; }
+  .timeline-item { margin: 12px 0; position: relative; }
+  .timeline-item::before { content: ''; width: 10px; height: 10px; background: var(--accent); border-radius: 50%; position: absolute; left: -26px; top: 6px; }
+  .role-card { padding: 15px; border-radius: 8px; }
+  .role-card h4 { margin-bottom: 5px; }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0 8px 20px; }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>UTC 2026 Case 1: Grand Strategy Guide</h1>
+  <p>Team ucla_calberkeley &mdash; April 11, Willis Tower Chicago</p>
+  <p style="color: var(--green); font-weight: 600;">22 cycles of iteration &bull; 102 golden principles &bull; 1244-line battle-tested bot</p>
+</div>
+
+<div class="toc">
+  <h3>Table of Contents</h3>
+  <a href="#tldr">0. TL;DR &mdash; What Our Bot Does</a>
+  <a href="#assets">1. The Assets &mdash; What We're Trading</a>
+  <a href="#fairvalue">2. Fair Value Models &mdash; How We Price Everything</a>
+  <a href="#mm">3. Market Making &mdash; How We Make Money</a>
+  <a href="#arb">4. Arbitrage &mdash; Free Money Strategies</a>
+  <a href="#news">5. News &mdash; How Events Change Prices</a>
+  <a href="#risk">6. Risk Management &mdash; How We Don't Blow Up</a>
+  <a href="#params">7. Hyperparameters &mdash; What to Tune and When</a>
+  <a href="#compday">8. Competition Day Plan</a>
+  <a href="#monitoring">9. Monitoring &mdash; What to Watch Live</a>
+  <a href="#lessons">10. Hard-Won Lessons from 22 Cycles</a>
+</div>
+
+<!-- ======================================================================= -->
+<h1 id="tldr">0. TL;DR &mdash; What Our Bot Does</h1>
+
+<div class="card green">
+<p>Our bot is a <strong>market maker</strong>. We post buy and sell orders around our estimated fair price of each asset, collecting the spread between our buys and sells. We also capture <strong>arbitrage</strong> opportunities when related instruments get mispriced relative to each other.</p>
+<p style="margin-top:10px"><strong>The tick-by-tick loop:</strong></p>
+<ol>
+  <li>Receive order book update from exchange</li>
+  <li>Recompute fair values for all assets</li>
+  <li>Cancel all our stale orders</li>
+  <li>Place fresh two-sided quotes around fair value (with inventory adjustment)</li>
+  <li>Check for ETF/options arbitrage opportunities</li>
+  <li>If news arrives: update our model, requote immediately</li>
+</ol>
+<p style="margin-top:10px"><strong>We make money from:</strong> bid-ask spread capture (~60%), ETF arb (~15%), options arb (~15%), Fed market (~10%)</p>
+</div>
+
+<!-- ======================================================================= -->
+<h1 id="assets">1. The Assets &mdash; What We're Trading</h1>
+
+<table>
+<tr><th>Symbol</th><th>What It Is</th><th>Price Range</th><th>Our Strategy</th></tr>
+<tr><td><code>A</code></td><td>Small-cap stock, constant P/E, driven by earnings</td><td>~600-1000</td><td>Market make around fair = EPS &times; PE</td></tr>
+<tr><td><code>B</code></td><td>Semiconductor stock, no direct info</td><td>~1000</td><td>Derive price from options (put-call parity)</td></tr>
+<tr><td><code>C</code></td><td>Insurance stock, yield + bond portfolio model</td><td>~1000-1100</td><td>Market make; price changes with Fed expectations</td></tr>
+<tr><td><code>ETF</code></td><td>= 1 share A + 1 share B + 1 share C</td><td>~2800-3200</td><td>Market make + arb when ETF &ne; NAV</td></tr>
+<tr><td><code>B_C_950/1000/1050</code></td><td>Call options on B at 3 strikes</td><td>varies</td><td>PCP arb + box spread arb</td></tr>
+<tr><td><code>B_P_950/1000/1050</code></td><td>Put options on B at 3 strikes</td><td>varies</td><td>PCP arb + box spread arb</td></tr>
+<tr><td><code>R_CUT/R_HOLD/R_HIKE</code></td><td>Fed prediction market (rate cut/hold/hike)</td><td>0-100 (prob &times; scale)</td><td>Quote around our probability estimates</td></tr>
+</table>
+
+<div class="card yellow">
+<strong>Key fact:</strong> All prices are <strong>integers</strong>. The exchange uses int prices, not floats. Swap names are <code>toETF</code> / <code>fromETF</code> (not toAKAV). gRPC port is <code>3333</code>.
+</div>
+
+<!-- ======================================================================= -->
+<h1 id="fairvalue">2. Fair Value Models &mdash; How We Price Everything</h1>
+
+<h3>Stock A: Simple Earnings Model</h3>
+<div class="formula">fair_A = EPS_A &times; PE_A &nbsp;&nbsp;&nbsp;(PE is constant, auto-calibrated from market)</div>
+<p>When earnings come in (random timing, can happen >2x per day), we update EPS and the price moves. PE is <strong>auto-calibrated</strong>: on first earnings, we compute PE = market_mid / EPS. Practice exchange showed PE ~657 (NOT 15 from the case packet).</p>
+
+<h3>Stock C: Yield + Bond Portfolio Model</h3>
+<div class="formula">
+PE_C = PE0 &times; exp(-&gamma; &times; (y - y0))<br>
+dB = (B0/N) &times; (-D &times; dy + 0.5 &times; C &times; dy&sup2;)<br>
+fair_C = EPS_C &times; PE_C + &lambda; &times; dB
+</div>
+
+<div class="card blue">
+<p><strong>What this means in plain English:</strong></p>
+<p>Stock C has two components: (1) its operating business value (EPS &times; PE), and (2) a bond portfolio whose value changes with interest rates. When rates go up, both PE drops (via the exponential) AND the bond portfolio loses value. When rates go down, both increase. The "convexity" term (0.5 &times; C &times; dy&sup2;) means the bond portfolio loses less on big rate hikes than you'd expect (it's like a buffer).</p>
+</div>
+
+<table>
+<tr><th>Parameter</th><th>Value</th><th>Meaning</th></tr>
+<tr><td>PE0</td><td>Auto-calibrate (~546 practice)</td><td>Baseline P/E at y0</td></tr>
+<tr><td>&gamma;</td><td>2.0 (unknown, calibrate!)</td><td>How sensitive PE is to yield changes</td></tr>
+<tr><td>B0/N</td><td>40.0</td><td>Bond portfolio value per share</td></tr>
+<tr><td>D</td><td>7.5</td><td>Duration (first-order rate sensitivity)</td></tr>
+<tr><td>C</td><td>55.0</td><td>Convexity (second-order buffer)</td></tr>
+<tr><td>&lambda;</td><td>0.65</td><td>Bond portfolio weight in price</td></tr>
+<tr><td>y0</td><td>0.045 (4.5%)</td><td>Baseline yield</td></tr>
+</table>
+
+<h3>Yield from Fed Expectations</h3>
+<div class="formula">
+E[dr] = 25 &times; q_hike - 25 &times; q_cut &nbsp;&nbsp;(in basis points)<br>
+yield = y0 + &beta;_y &times; E[dr] &nbsp;&nbsp;&nbsp;(&beta;_y = 0.001)
+</div>
+<p>If market thinks the Fed will hike (q_hike is high), the expected rate change E[dr] is positive, yield goes up, C price goes down. If market thinks cut, yield drops, C price goes up.</p>
+
+<h3>Stock B: Implied from Options</h3>
+<div class="formula">
+From put-call parity: S = C - P + K &times; e<sup>-rT</sup><br>
+We average the implied B price across all 3 strikes with valid data.
+</div>
+
+<h3>ETF: Sum of Parts (NAV)</h3>
+<div class="formula">
+fair_ETF = fair_A + fair_B + fair_C
+</div>
+<p>When ETF market price diverges from this NAV, that's an arbitrage opportunity.</p>
+
+<h3>Fed Probability Initialization</h3>
+<div class="card yellow">
+<strong>Critical lesson:</strong> Do NOT start with 1/3 each. Initialize from market prices: read R_CUT/R_HOLD/R_HIKE mid prices, normalize to get probabilities. Practice market had cut=99.5% while our 33% priors caused us to lose money buying R_HIKE at 3. After initialization, blend 60% market / 40% model on subsequent updates.
+</div>
+
+<!-- ======================================================================= -->
+<h1 id="mm">3. Market Making &mdash; How We Make Money</h1>
+
+<h3>The Core Loop: Cancel-Before-Requote</h3>
+<p>Every time we get a book update for a symbol we're making a market in:</p>
+<ol>
+  <li><strong>Cancel</strong> all our existing orders for that symbol</li>
+  <li><strong>Compute</strong> adjusted fair value = fair + inventory_fade + OBI_skew</li>
+  <li><strong>Place</strong> multi-level two-sided quotes around it</li>
+</ol>
+
+<h3>Quote Structure (3 Levels)</h3>
+<pre><code>Level 1 (Penny-in):  bid = best_bid + 1,  ask = best_ask - 1   [size: MM_SIZE/2]
+Level 2 (Fair-edge):  bid = adj_fair - edge, ask = adj_fair + edge  [size: MM_SIZE]
+Level 3 (Wide):       bid = adj_fair - edge - 2, ask = adj_fair + edge + 2  [size: MM_SIZE-2]</code></pre>
+<p>Penny-in at L1 is crucial &mdash; it improved A fills from 0 to 123 per session.</p>
+
+<h3>Inventory Fade (Logarithmic)</h3>
+<div class="formula">fade = -0.5 &times; sign(pos) &times; log&sub2;(1 + |pos|)</div>
+<p>When we're <strong>long</strong>, fade is <strong>negative</strong> (shifts both bid and ask down, encouraging sells to us). When <strong>short</strong>, fade is positive (shifts up, encouraging buys). The logarithm means small positions barely shift quotes, but large positions shift aggressively.</p>
+
+<h3>Adaptive Edge (Tanh Formula)</h3>
+<div class="formula">edge = 1 + 3 &times; tanh(|pos| / 20)</div>
+<p><strong>At position 0:</strong> edge = 1 tick (tightest spread, maximum fills). <strong>At position 20:</strong> edge = 3.28 ticks (wider, earn more per fill). This means we compete aggressively when flat and charge more when we're carrying risk.</p>
+
+<h3>Order Book Imbalance (OBI) Skew</h3>
+<div class="formula">skew = 1.5 &times; (bid_vol - ask_vol) / (bid_vol + ask_vol + 1), capped at &plusmn;3</div>
+<p>If lots of people want to buy (bid volume high), we shift our quotes slightly up &mdash; our sell side gets tighter (more fills), capturing the demand.</p>
+
+<h3>50ms Requote Throttle</h3>
+<p>We skip requoting the same symbol if less than 50ms has passed since the last requote. This prevents <strong>async cancel stacking</strong> &mdash; the #1 cause of position blowups. Without it, rapid book updates cause 3+ batches of orders to pile up before cancels land.</p>
+
+<!-- ======================================================================= -->
+<h1 id="arb">4. Arbitrage &mdash; Free Money Strategies</h1>
+
+<div class="grid">
+<div class="card green">
+<h3>ETF Arbitrage</h3>
+<p><strong>When ETF price &gt; NAV + $6:</strong> Sell ETF at best_bid, swap fromETF (redeem) if we hold ETF.</p>
+<p><strong>When ETF price &lt; NAV - $6:</strong> Buy ETF at best_ask, swap toETF (create) if we hold A+B+C.</p>
+<p>Swap fee is $5 flat. Edge threshold = $6 (fee + $1 buffer).</p>
+<p>Fires <strong>every tick</strong>.</p>
+</div>
+
+<div class="card green">
+<h3>Put-Call Parity Arb</h3>
+<p><strong>PCP: C - P = S - K&times;e<sup>-rT</sup></strong></p>
+<p>For each of 3 strikes, check if the market violates parity by more than 1 tick.</p>
+<p>If call overpriced: sell call, buy put.</p>
+<p>If put overpriced: buy call, sell put.</p>
+<p>Fires <strong>every 2 ticks</strong>.</p>
+</div>
+
+<div class="card green">
+<h3>Box Spread Arb</h3>
+<p><strong>Box(K1,K2) always pays K2 - K1 at expiry.</strong></p>
+<p>If you can buy the box cheaper than its fair value (K2-K1)&times;e<sup>-rT</sup>, it's free money.</p>
+<p>We check all 3 strike pairs: (950,1000), (950,1050), (1000,1050).</p>
+<p>Fires <strong>every 3 ticks</strong>.</p>
+</div>
+
+<div class="card blue">
+<h3>Fed Market Quoting</h3>
+<p>We quote the prediction market around our probability estimate &times; market scale.</p>
+<p>Size = 2 per order (small to limit cascade), edge = 3, soft limit = 20.</p>
+<p>Fires <strong>every 10 ticks</strong>.</p>
+</div>
+</div>
+
+<!-- ======================================================================= -->
+<h1 id="news">5. News &mdash; How Events Change Prices</h1>
+
+<table>
+<tr><th>News Type</th><th>Subtype</th><th>Effect</th><th>Action</th></tr>
+<tr><td>Structured</td><td><code>earnings</code></td><td>Updates EPS for A or C</td><td>Recalc fair value, requote A/C/ETF immediately</td></tr>
+<tr><td>Structured</td><td><code>cpi_print</code></td><td>CPI actual vs forecast</td><td>Bayesian update: hot CPI &rarr; shift to hike, cool CPI &rarr; shift to cut. Requote C/ETF/Fed.</td></tr>
+<tr><td>Structured</td><td><code>petition</code></td><td>Signatures for Fed outcomes</td><td>Blend 20% petition signal into Fed probs. Requote C/ETF.</td></tr>
+<tr><td>Unstructured</td><td>(headline)</td><td>Keyword sentiment</td><td>Hawk words (inflation, hike, hot) shift toward hike. Dove words (recession, cut, weak) shift toward cut. Each keyword = 5% shift, capped at 25%.</td></tr>
+</table>
+
+<div class="card yellow">
+<strong>Timing:</strong> Earnings are at RANDOM times (NOT fixed ticks). A can get >2 earnings per day. Parse news dynamically &mdash; never hardcode timing.
+</div>
+
+<!-- ======================================================================= -->
+<h1 id="risk">6. Risk Management &mdash; How We Don't Blow Up</h1>
+
+<h3>Exchange Hard Limits (Per Symbol)</h3>
+<table>
+<tr><th>Limit</th><th>Value</th><th>Our Buffer</th></tr>
+<tr><td>Max Order Size</td><td>40</td><td>We use 5 (MM) or 1-2 (arb/fed)</td></tr>
+<tr><td>Max Open Orders</td><td>50</td><td>Buffer of 2</td></tr>
+<tr><td>Outstanding Volume</td><td>120</td><td>Buffer of 5</td></tr>
+<tr><td>Max Abs Position</td><td>200</td><td>Self-imposed soft limits well below</td></tr>
+</table>
+
+<div class="card red">
+<strong>Violations are SILENT.</strong> Orders just get rejected with no specific reason. The bot can't tell which limit it hit.
+</div>
+
+<h3>Our Defense Layers (Innermost to Outermost)</h3>
+<ol>
+  <li><strong>safe_place() checks:</strong> Every order goes through risk checks (open orders, outstanding volume, position room)</li>
+  <li><strong>Position room:</strong> Clamps order qty to soft limit (60 stocks, 30 ETF, 20 options/fed)</li>
+  <li><strong>Hard stop on fill (80%/70%):</strong> When a fill pushes position past 80% of soft limit (70% for Fed), cancel ALL orders on that symbol</li>
+  <li><strong>Emergency unwind (60%):</strong> When position exceeds 60% of soft limit, skip normal MM and only place aggressive cross-spread unwind orders</li>
+  <li><strong>Position gate (100%):</strong> When position hits soft limit, refuse ALL new MM orders</li>
+  <li><strong>50ms requote throttle:</strong> Prevents order stacking from rapid book updates</li>
+</ol>
+
+<h3>The Cascade Problem (Our Biggest Enemy)</h3>
+<div class="card red">
+<p>The <strong>async cancel lag</strong> is the root cause of all blowups. Here's how it works:</p>
+<ol>
+  <li>Book updates fire faster than cancel confirmations arrive</li>
+  <li>Each requote cycle places ~15 units of new orders</li>
+  <li>3 rapid updates = 45 units resting at similar prices</li>
+  <li>When price moves, all 45 fill simultaneously before any cancel takes effect</li>
+  <li>Position jumps from 0 to 45+ in a single tick</li>
+</ol>
+<p><strong>Our solution:</strong> 50ms throttle + 60% emergency threshold + position gate + small order sizes (5).</p>
+<p><strong>At competition, positions reset each round</strong>, so inherited-position cascades are NOT an issue.</p>
+</div>
+
+<!-- ======================================================================= -->
+<h1 id="params">7. Hyperparameters &mdash; What to Tune and When</h1>
+
+<h3>Current Tuned Parameters (Cycle 22)</h3>
+
+<div class="card blue">
+<div class="param-row"><span class="param-name">MM_LEVELS</span><span class="param-val">3</span><span class="param-note">L1=penny-in, L2-L3=fair&plusmn;edge</span></div>
+<div class="param-row"><span class="param-name">MM_LEVEL_STEP</span><span class="param-val">2</span><span class="param-note">price gap between levels</span></div>
+<div class="param-row"><span class="param-name">MM_BASE_EDGE</span><span class="param-val">1</span><span class="param-note">min half-spread (tightest possible)</span></div>
+<div class="param-row"><span class="param-name">MM_SIZE</span><span class="param-val">5</span><span class="param-note">order qty per level</span></div>
+<div class="param-row"><span class="param-name">MM_FADE_FACTOR</span><span class="param-val">0.5</span><span class="param-note">logarithmic fade strength</span></div>
+<div class="param-row"><span class="param-name">ADAPTIVE_EDGE_MAX</span><span class="param-val">3</span><span class="param-note">max extra edge from inventory</span></div>
+<div class="param-row"><span class="param-name">ADAPTIVE_EDGE_SCALE</span><span class="param-val">20</span><span class="param-note">tanh scale (pos=20 &rarr; 76% of max)</span></div>
+<div class="param-row"><span class="param-name">OBI_STRENGTH</span><span class="param-val">1.5</span><span class="param-note">order book imbalance skew</span></div>
+<div class="param-row"><span class="param-name">OBI_MAX_SKEW</span><span class="param-val">3</span><span class="param-note">max OBI shift in price units</span></div>
+<div class="param-row"><span class="param-name">ETF_ARB_EDGE</span><span class="param-val">1</span><span class="param-note">min edge beyond $5 swap fee</span></div>
+<div class="param-row"><span class="param-name">PCP_ARB_EDGE</span><span class="param-val">1</span><span class="param-note">min parity violation to trade</span></div>
+<div class="param-row"><span class="param-name">BOX_ARB_EDGE</span><span class="param-val">1</span><span class="param-note">min box violation to trade</span></div>
+<div class="param-row"><span class="param-name">FED_MM_EDGE</span><span class="param-val">3</span><span class="param-note">Fed market half-spread</span></div>
+<div class="param-row"><span class="param-name">FED_MM_SIZE</span><span class="param-val">2</span><span class="param-note">Fed order size (small = safe)</span></div>
+<div class="param-row"><span class="param-name">SOFT_POS_LIMIT_STOCK</span><span class="param-val">60</span><span class="param-note">self-imposed stock pos limit</span></div>
+<div class="param-row"><span class="param-name">SOFT_POS_LIMIT_ETF</span><span class="param-val">30</span><span class="param-note">ETF accumulates fastest</span></div>
+<div class="param-row"><span class="param-name">SOFT_POS_LIMIT_OPT</span><span class="param-val">20</span><span class="param-note">option position limit</span></div>
+<div class="param-row"><span class="param-name">SOFT_POS_LIMIT_FED</span><span class="param-val">20</span><span class="param-note">Fed market limit</span></div>
+</div>
+
+<h3>When to Adjust Mid-Competition</h3>
+
+<table>
+<tr><th>Signal</th><th>Action</th></tr>
+<tr><td>Fill rate &lt; 3%</td><td>Reduce ADAPTIVE_EDGE_MAX from 3 to 2 (tighter spreads)</td></tr>
+<tr><td>Fill rate &gt; 15% with negative PNL</td><td>Increase MM_BASE_EDGE to 2 (wider spreads, less adverse selection)</td></tr>
+<tr><td>Positions oscillating &plusmn;30-50</td><td>Increase MM_FADE_FACTOR to 0.7 (stronger inventory control)</td></tr>
+<tr><td>ETF positions blowing up</td><td>Reduce SOFT_POS_LIMIT_ETF to 20</td></tr>
+<tr><td>No arb fills</td><td>Arb edges too tight &mdash; these should be left at 1</td></tr>
+<tr><td>PNL per fill very low</td><td>Increase ADAPTIVE_EDGE_MAX to 4 (earn more per trade)</td></tr>
+</table>
+
+<div class="card purple">
+<strong>Competition vs Practice:</strong> Practice exchange uses scaled PE values (~500-660). The competition exchange may use the original Ed #40 values (PE=14). The bot auto-calibrates from market_price/EPS, so it adapts automatically. But be ready for very different price levels (maybe A~30 instead of ~600).
+</div>
+
+<!-- ======================================================================= -->
+<h1 id="compday">8. Competition Day Plan</h1>
+
+<h3>Timeline: Saturday April 11, Willis Tower</h3>
+<div class="timeline">
+  <div class="timeline-item"><strong>8:30 AM</strong> &mdash; Arrive at venue. Set up laptops. Test SSH to EC2 instances.</div>
+  <div class="timeline-item"><strong>8:45 AM</strong> &mdash; Install/reinstall utcxchangelib on EC2. Verify <code>python3 -c "import bot; print('OK')"</code></div>
+  <div class="timeline-item"><strong>9:00 AM</strong> &mdash; Competition briefing. Listen for any rule changes or new info about the meta market.</div>
+  <div class="timeline-item"><strong>9:15 AM</strong> &mdash; Round 1 begins. Start bot: <code>python3 bot.py &lt;host:port&gt; ucla_calberkeley &lt;password&gt;</code></div>
+  <div class="timeline-item"><strong>9:15-9:17</strong> &mdash; CRITICAL FIRST 2 MINUTES: Watch PE calibration, Fed initialization, first fills. Confirm bot is trading.</div>
+  <div class="timeline-item"><strong>9:17-9:27</strong> &mdash; Monitor positions, PNL, fill rate. Adjust params if needed.</div>
+  <div class="timeline-item"><strong>9:27-9:30</strong> &mdash; Widen spreads slightly for end-of-round. Bot handles round reset via market_resolved callback.</div>
+  <div class="timeline-item"><strong>Between rounds</strong> &mdash; Review metrics.jsonl. Adjust parameters for next round.</div>
+</div>
+
+<h3>Team Roles (4 People)</h3>
+
+<div class="grid">
+<div class="card green role-card">
+  <h4>Yifan: Bot Operator</h4>
+  <p>Start/stop bot. SSH into EC2. Watch log output for errors. Make parameter changes in code between rounds. The only one who touches bot.py.</p>
+</div>
+<div class="card blue role-card">
+  <h4>Emily: Dashboard Monitor</h4>
+  <p>Watch the web UI (http://host:3001). Track positions across all symbols. Call out when any position exceeds 50% of soft limit. Track leaderboard.</p>
+</div>
+<div class="card purple role-card">
+  <h4>Gary: Metrics & PNL</h4>
+  <p>Watch terminal output for STATUS and METRICS lines. Track fill rate, PNL progression, arb fill count. Compute: is our fill rate good? Is PNL/fill positive? Signal when to adjust.</p>
+</div>
+<div class="card yellow role-card">
+  <h4>Margaret: News & Strategy</h4>
+  <p>Watch for CPI prints, earnings, Fed news on the platform. Cross-reference with what the bot is doing. If Meta Market is revealed, quickly analyze and help Yifan add handling code.</p>
+</div>
+</div>
+
+<h3>Competition-Specific Advantages</h3>
+<div class="card green">
+<ul>
+  <li><strong>Positions reset every round</strong> &mdash; No inherited cascades (our biggest practice problem). All 20 cycles of cascade fixes ensure we never blow up from a clean start.</li>
+  <li><strong>Scoring is LOWER = BETTER</strong> &mdash; Rank-based within each round, sum across rounds. Consistency beats variance.</li>
+  <li><strong>Later rounds weighted more</strong> &mdash; Don't panic early. Steady performance in rounds 5-8 matters more than crushing round 1.</li>
+  <li><strong>Nonlinear PNL &rarr; points</strong> &mdash; Small steady profits &gt;&gt; volatile big swings. Our position gates and fade ensure we stay small and consistent.</li>
+</ul>
+</div>
+
+<!-- ======================================================================= -->
+<h1 id="monitoring">9. Monitoring &mdash; What to Watch Live</h1>
+
+<h3>Terminal Output to Watch</h3>
+<pre><code>STATUS tick=200 pos={'A': 12, 'C': -5, 'ETF': 8} fair={'A': '683', 'C': '1055', 'B': '987', 'ETF': '2725'} cash=150432 fed=(0.01/0.83/0.16)
+METRICS: PNL=+15432 fills=87 orders=1240 fill_rate=7.0% arbs=3
+FILL: BUY 5x A @ 681  |  pos=17
+EARNINGS: A EPS = 1.42
+CALIBRATED A_PE = 481.0 (mid=683, eps=1.42)
+EMERGENCY UNWIND: ETF pos=22 >= 18, selling 5 @ 2720</code></pre>
+
+<h3>Key Metrics Every 30 Seconds</h3>
+<table>
+<tr><th>Metric</th><th>Good</th><th>Concerning</th><th>Action</th></tr>
+<tr><td>Fill Rate</td><td>5-12%</td><td>&lt;3% or &gt;20%</td><td>Low: tighten edge. High: widen (being picked off)</td></tr>
+<tr><td>Net Position (any symbol)</td><td>&lt;30</td><td>&gt;40</td><td>Increase fade, check if emergency unwind is firing</td></tr>
+<tr><td>PNL</td><td>Positive and growing</td><td>Negative and falling</td><td>Widen spreads. Check fair values.</td></tr>
+<tr><td>EMERGENCY UNWIND lines</td><td>Rare (0-5/min)</td><td>Constant stream</td><td>Bot is stuck. May need to restart.</td></tr>
+<tr><td>REJECTED lines</td><td>0</td><td>&gt;0</td><td>Hitting exchange limits. Reduce order volume.</td></tr>
+</table>
+
+<h3>Signals to Change Strategy</h3>
+<div class="card red">
+<ul>
+  <li><strong>Bot frozen in emergency unwind for 2+ minutes:</strong> Kill and restart. Clean start is better than stuck bot.</li>
+  <li><strong>Fill rate 0%:</strong> Bot not connected, or fair values way off. Check CALIBRATED log lines.</li>
+  <li><strong>Position at &plusmn;200 (exchange max):</strong> Something broke. Kill bot, manually unwind, restart.</li>
+  <li><strong>Negative PNL accelerating:</strong> Widen MM_BASE_EDGE to 2. If still losing, raise ADAPTIVE_EDGE_MAX to 4.</li>
+</ul>
+</div>
+
+<!-- ======================================================================= -->
+<h1 id="lessons">10. Hard-Won Lessons from 22 Cycles</h1>
+
+<h3>The Top 10 Things That Matter Most</h3>
+<ol>
+  <li><strong>Cancel all stale orders on startup.</strong> Stale resting orders from previous sessions cascade-fill when price moves. This was our #1 source of losses for 7 cycles.</li>
+  <li><strong>50ms requote throttle prevents async cancel stacking.</strong> Without it, rapid book updates cause 3+ batches of orders to pile up. With it, fills doubled from 117 to 244.</li>
+  <li><strong>Auto-calibrate PE from market, don't hardcode.</strong> Practice exchange had PE ~500-660 vs Ed packet's 14. Wrong PE = wrong fair value = losing money.</li>
+  <li><strong>Initialize Fed probs from market, not 1/3 each.</strong> Market had cut=99.5%. Our 33% hike prior caused us to buy R_HIKE at 3 and lose money.</li>
+  <li><strong>Position gate at soft limit is a hard wall.</strong> This capped clean-start A position from &minus;197 (Cycle 17) to 46 (Cycle 18). Structural fix.</li>
+  <li><strong>60% emergency threshold intervenes early.</strong> 70% was too late &mdash; cascades already pushed past limit. 60% gives enough room for normal MM (0-36) while catching problems early (36-60).</li>
+  <li><strong>Penny-in at L1 captures flow.</strong> A fills went from 0 to 123 when we added best_bid+1 / best_ask-1 as our first quote level.</li>
+  <li><strong>Logarithmic fade &gt; linear fade.</strong> Log&#8322; barely adjusts for small positions (1-5) but aggressively corrects large ones (20+). Winner teams confirm this.</li>
+  <li><strong>ETF accumulates position fastest.</strong> Keep soft limit tight (30). It's our #1 source of runaway positions. The swap fee ($5) means arb needs real edge to be worth it.</li>
+  <li><strong>Scoring rewards consistency over magnitude.</strong> Lower is better. Later rounds weighted more. Small steady PNL &gt;&gt; one massive round. Our adaptive edge + position gate naturally produce this pattern.</li>
+</ol>
+
+<h3>PNL Journey</h3>
+<table>
+<tr><th>Cycle</th><th>End PNL</th><th>Peak PNL</th><th>Key Breakthrough</th></tr>
+<tr><td>1</td><td>+17k</td><td>+17k</td><td>First trades! 325 fills.</td></tr>
+<tr><td>3</td><td><span class="tag tag-green">+375k</span></td><td>+375k</td><td>Penny-in + tight edge. Fills 4.8x.</td></tr>
+<tr><td>8</td><td>-97k</td><td><span class="tag tag-green">+991k</span></td><td>Startup cancel eliminates stale orders.</td></tr>
+<tr><td>16</td><td><span class="tag tag-green">+228k</span></td><td>+511k</td><td>Startup unwind + quoting block.</td></tr>
+<tr><td>18</td><td><span class="tag tag-green">+42k</span></td><td>+42k</td><td>Position gate: A capped at 46.</td></tr>
+<tr><td>22</td><td>-57k (inherited B=198)</td><td>~+200k</td><td>Adaptive edge + OBI. 49-58% fill rate early.</td></tr>
+</table>
+
+<div class="card green" style="margin-top: 30px;">
+<h3 style="margin-top: 0;">Bottom Line</h3>
+<p>Our bot is a <strong>battle-tested market maker</strong> with 22 iterations of live-exchange tuning. It auto-calibrates to the market it's in, manages inventory with logarithmic fade and adaptive spreads, captures 3 types of arbitrage, and has 6 layers of risk management. At competition (clean start each round), many of our hardest problems (inherited positions, stale cascades) don't apply. Focus on: PE calibration in the first 30 seconds, steady fills, consistent PNL across rounds. <strong>Let's go win this.</strong></p>
+</div>
+
+</body>
+</html>
