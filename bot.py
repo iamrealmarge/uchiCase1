@@ -214,9 +214,19 @@ SOFT_POS_LIMIT_FED   = 20   # was 30 — tightened to prevent Fed symbol accumul
 MM_SYMBOLS = ["A", "C", "ETF"]
 
 # Time to expiry for options (fraction of a year, approximate)
-# Each round = 15 min, ~10 days at 90s each = 900s of sim time
-# We'll treat T as small constant; refine if we can track ticks
 OPT_T = 0.01
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ROUND-END FLATTENING
+# Each round = 10 days × 90 seconds × 5 ticks = 4,500 exchange ticks.
+# We must flatten positions before settlement to keep our spread profits.
+# Without this: cash PNL +137k but settlement of open positions costs -131k → leaderboard +6k.
+# With this: cash PNL ~+130k, settlement ~0 → leaderboard ~+130k.
+# ═══════════════════════════════════════════════════════════════════════════════
+ROUND_TICKS         = 4500   # total exchange ticks per round
+FLATTEN_START_TICK  = 3600   # 80% — start reducing soft limits progressively
+FLATTEN_HARD_TICK   = 4200   # 93% — cancel all MM, aggressively cross spreads to flatten
+FLATTEN_STOP_MM_TICK = 4350  # 97% — no new MM quotes, only flatten remaining positions
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -245,6 +255,10 @@ class Case1Bot(XChangeClient):
         self.yield_y = Y0
         self.pe_c    = self.c_pe0 if self.c_pe0 else 14.0
         self.fed_initialized = False  # whether we've read market priors
+
+        # ── Round timing ──
+        self.exchange_tick = 0       # updated from news events
+        self.round_start_time = time.time()  # wall clock for flattening fallback
 
         # ── Startup: cancel stale orders on first book update ──
         self.startup_cancel_done = False
@@ -742,6 +756,66 @@ class Case1Bot(XChangeClient):
                 await self.safe_place(sym, FED_MM_SIZE, "sell", ask_px)
 
     # ─────────────────────────────────────────────────────────────────────────
+    # ROUND-END FLATTENING
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def flatten_all_positions(self, aggressive: bool = False):
+        """
+        Flatten all positions toward zero before round-end settlement.
+        If aggressive=True, cross the spread for guaranteed fills.
+        If aggressive=False, place limit orders near mid.
+        """
+        for sym in list(self.order_books.keys()):
+            pos = self.positions.get(sym, 0)
+            if pos == 0 or sym == "cash":
+                continue
+
+            # Cancel all existing orders on this symbol
+            await self.cancel_all_symbol(sym)
+
+            bb, _ = self.best_bid(sym)
+            ba, _ = self.best_ask(sym)
+            mid = self.mid_price(sym)
+            if mid is None:
+                continue
+
+            qty = min(abs(pos), MAX_ORDER_SIZE)
+            if qty <= 0:
+                continue
+
+            if pos > 0:
+                # Long → sell to flatten
+                if aggressive and bb is not None:
+                    px = int(bb)  # cross spread — guaranteed fill
+                else:
+                    px = int(mid)  # at mid — likely fill
+                if px > 0:
+                    await self.safe_place(sym, qty, "sell", px)
+            else:
+                # Short → buy to flatten
+                if aggressive and ba is not None:
+                    px = int(ba)  # cross spread — guaranteed fill
+                else:
+                    px = int(mid)  # at mid — likely fill
+                if px > 0:
+                    await self.safe_place(sym, qty, "buy", px)
+
+    def get_dynamic_soft_limit(self, symbol: str) -> int:
+        """
+        During flattening phase, progressively reduce soft limits toward 0.
+        Uses exchange tick or wall clock, whichever indicates more progress.
+        """
+        base_limit = self.get_soft_limit(symbol)
+        elapsed_sec = time.time() - self.round_start_time
+        # Calculate progress from both signals, use the larger (more conservative)
+        tick_progress = max(0, (self.exchange_tick - FLATTEN_START_TICK) / max(1, FLATTEN_STOP_MM_TICK - FLATTEN_START_TICK))
+        time_progress = max(0, (elapsed_sec - 720) / max(1, 870 - 720))  # 720s=12min start, 870s=14:30 stop
+        progress = min(1.0, max(tick_progress, time_progress))
+        if progress <= 0:
+            return base_limit
+        return max(3, int(base_limit * (1 - progress)))
+
+    # ─────────────────────────────────────────────────────────────────────────
     # ETF ARBITRAGE (via swaps)
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -1057,6 +1131,32 @@ class Case1Bot(XChangeClient):
 
         self.tick_count += 1
 
+        # ── ROUND-END FLATTENING ──
+        # Use exchange tick if available, otherwise fall back to wall clock time
+        # Each round = 15 min = 900 seconds. Flattening phases map to both.
+        elapsed_sec = time.time() - self.round_start_time
+        etick = self.exchange_tick
+        # Determine flattening phase from whichever signal is available
+        in_stop = (etick >= FLATTEN_STOP_MM_TICK) or (elapsed_sec >= 870)   # 97% = 14:30
+        in_hard = (etick >= FLATTEN_HARD_TICK) or (elapsed_sec >= 840)      # 93% = 14:00
+        in_gentle = (etick >= FLATTEN_START_TICK) or (elapsed_sec >= 720)   # 80% = 12:00
+
+        if in_stop:
+            # Last 30 sec: ONLY flatten, no new quotes at all
+            if self.tick_count % 5 == 0:
+                await self.flatten_all_positions(aggressive=True)
+            return
+        elif in_hard:
+            # 14:00-14:30: aggressive flatten + no new MM quotes
+            if self.tick_count % 3 == 0:
+                await self.flatten_all_positions(aggressive=True)
+            return
+        elif in_gentle:
+            # 12:00-14:00: still MM but with progressively tighter limits + periodic flatten
+            if self.tick_count % 10 == 0:
+                await self.flatten_all_positions(aggressive=False)
+            # Continue to normal MM below with dynamic soft limits
+
         # Recompute fairs (cheap — do it every update)
         self.recompute_all_fairs()
 
@@ -1067,8 +1167,9 @@ class Case1Bot(XChangeClient):
         for sym in symbols_to_requote:
             if sym in MM_SYMBOLS:
                 pos = self.positions.get(sym, 0)
-                soft = self.get_soft_limit(sym)
-                emergency_threshold = 0.6 * soft  # intervene early before cascade pushes past soft_limit
+                # Use dynamic soft limit during flattening phase
+                soft = self.get_dynamic_soft_limit(sym) if self.exchange_tick >= FLATTEN_START_TICK else self.get_soft_limit(sym)
+                emergency_threshold = 0.6 * soft if soft > 0 else 0
                 if abs(pos) > emergency_threshold:
                     # Position past 60% of soft limit — skip normal MM, just emergency unwind.
                     mid = self.mid_price(sym)
@@ -1114,8 +1215,11 @@ class Case1Bot(XChangeClient):
             pos_str = {k: v for k, v in self.positions.items() if v != 0 and k != 'cash'}
             fair_str = {k: f"{v:.0f}" for k, v in self.fair.items()}
             self.metrics.snapshot(cash, self.positions)
-            log.info(f"STATUS tick={self.tick_count} pos={pos_str} fair={fair_str} "
-                     f"cash={cash} "
+            phase = "NORMAL" if self.exchange_tick < FLATTEN_START_TICK else (
+                "FLATTEN_GENTLE" if self.exchange_tick < FLATTEN_HARD_TICK else (
+                "FLATTEN_HARD" if self.exchange_tick < FLATTEN_STOP_MM_TICK else "FLATTEN_STOP"))
+            log.info(f"STATUS tick={self.tick_count} etick={self.exchange_tick} [{phase}] "
+                     f"pos={pos_str} fair={fair_str} cash={cash} "
                      f"fed=({self.q_hike:.2f}/{self.q_hold:.2f}/{self.q_cut:.2f})")
         # Metrics report every 1000 ticks
         if self.tick_count % 1000 == 0:
@@ -1187,6 +1291,11 @@ class Case1Bot(XChangeClient):
             }
           }
         """
+        # Track exchange tick for round timing
+        tick = news_release.get('tick', 0)
+        if tick > 0:
+            self.exchange_tick = tick
+
         data = news_release.get('new_data', {})
         kind = news_release.get('kind', '')
 
@@ -1226,6 +1335,8 @@ class Case1Bot(XChangeClient):
         self.eps.clear()
         self.fair.clear()
         self.tick_count = 0
+        self.exchange_tick = 0
+        self.round_start_time = time.time()  # reset timer for new round
 
     async def bot_handle_settlement_payout(self, user: str, market_id: str, amount: int, tick: int):
         """Called when settlement payout occurs."""
