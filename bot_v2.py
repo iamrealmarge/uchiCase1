@@ -255,6 +255,11 @@ class Case1Bot(XChangeClient):
         self.news_positions = {}   # symbol → (direction, size, entry_time) for 15s exit
         self.news_mode_until = 0   # timestamp when news mode ends
 
+        # ── Live PNL tracking ──
+        self.news_trades = []      # list of {'asset','direction','entry_px','size','t'}
+        self.realized_news_pnl = 0 # running total of closed news trade PNL
+        self.round_number = 0
+
     # ─────────────────────────────────────────────────────────────────────────
     # HELPERS: Order book reading
     # ─────────────────────────────────────────────────────────────────────────
@@ -797,14 +802,14 @@ class Case1Bot(XChangeClient):
                     ba, _ = self.best_ask(asset)
                     if ba:
                         await self.safe_place(asset, 20, "buy", ba)
-                        self.news_positions[asset] = ("BUY", 20, now)
+                        self.news_positions[asset] = ("BUY", 20, now, ba)
                         log.info(f"NEWS TRADE: BUY {asset} x20 @ {ba} (edge={edge:+.1f})")
                 else:
                     # Fair went down: sell at best_bid (take stale bid)
                     bb, _ = self.best_bid(asset)
                     if bb:
                         await self.safe_place(asset, 20, "sell", bb)
-                        self.news_positions[asset] = ("SELL", 20, now)
+                        self.news_positions[asset] = ("SELL", 20, now, bb)
                         log.info(f"NEWS TRADE: SELL {asset} x20 @ {bb} (edge={edge:+.1f})")
 
                 # If A or C earnings and edge > 10, also trade ETF in same direction
@@ -813,13 +818,13 @@ class Case1Bot(XChangeClient):
                         ba_etf, _ = self.best_ask("ETF")
                         if ba_etf:
                             await self.safe_place("ETF", 5, "buy", ba_etf)
-                            self.news_positions["ETF"] = ("BUY", 5, now)
+                            self.news_positions["ETF"] = ("BUY", 5, now, ba_etf)
                             log.info(f"NEWS TRADE: BUY ETF x5 @ {ba_etf} ({asset} edge={edge:+.1f})")
                     else:
                         bb_etf, _ = self.best_bid("ETF")
                         if bb_etf:
                             await self.safe_place("ETF", 5, "sell", bb_etf)
-                            self.news_positions["ETF"] = ("SELL", 5, now)
+                            self.news_positions["ETF"] = ("SELL", 5, now, bb_etf)
                             log.info(f"NEWS TRADE: SELL ETF x5 @ {bb_etf} ({asset} edge={edge:+.1f})")
 
         # Flag for requote after news mode expires
@@ -961,18 +966,30 @@ class Case1Bot(XChangeClient):
         # 15-second news position exit check
         now = time.time()
         for sym in list(self.news_positions.keys()):
-            direction, size, entry_time = self.news_positions[sym]
+            pos_data = self.news_positions[sym]
+            direction, size, entry_time = pos_data[0], pos_data[1], pos_data[2]
+            entry_px = pos_data[3] if len(pos_data) > 3 else None
             if now - entry_time >= 15:
+                exit_px = None
                 if direction == "BUY":
                     bb, _ = self.best_bid(sym)
                     if bb:
                         await self.safe_place(sym, size, "sell", bb)
+                        exit_px = bb
                 else:
                     ba, _ = self.best_ask(sym)
                     if ba:
                         await self.safe_place(sym, size, "buy", ba)
+                        exit_px = ba
+                # Track PNL
+                if entry_px and exit_px:
+                    pnl = (exit_px - entry_px) * size if direction == "BUY" else (entry_px - exit_px) * size
+                    self.realized_news_pnl += pnl
+                    log.info(f"NEWS EXIT: {sym} {direction} {size} @ {exit_px} (entry={entry_px}) "
+                             f"PNL={pnl:+.0f} | TOTAL NEWS PNL={self.realized_news_pnl:+.0f}")
+                else:
+                    log.info(f"NEWS EXIT: {sym} {direction} {size} after 15s")
                 del self.news_positions[sym]
-                log.info(f"NEWS EXIT: {sym} {direction} {size} after 15s")
 
         # Suppress all MM during news reaction window
         if time.time() < self.news_mode_until:
@@ -1002,9 +1019,20 @@ class Case1Bot(XChangeClient):
             pos_str = {k: v for k, v in self.positions.items() if v != 0 and k != 'cash'}
             fair_str = {k: f"{v:.0f}" for k, v in self.fair.items()}
             self.metrics.snapshot(cash, self.positions)
-            log.info(f"STATUS tick={self.tick_count} pos={pos_str} fair={fair_str} "
-                     f"cash={cash} "
-                     f"fed=({self.q_hike:.2f}/{self.q_hold:.2f}/{self.q_cut:.2f})")
+            # Estimate mark-to-market PNL
+            mtm = cash
+            for sym, qty in self.positions.items():
+                if sym == 'cash' or qty == 0:
+                    continue
+                mid = self.mid_price(sym)
+                if mid:
+                    mtm += qty * mid
+            open_news = {k: f"{v[0]} {v[1]}@{v[3]}" for k, v in self.news_positions.items()} if self.news_positions else {}
+            log.info(f"═══ DASHBOARD ═══ tick={self.tick_count} | cash={cash:+,.0f} | MTM={mtm:+,.0f} | "
+                     f"news_pnl={self.realized_news_pnl:+,.0f} | fills={self.metrics.fills} | "
+                     f"pos={pos_str} | fair={fair_str} | "
+                     f"PE_A={self.a_pe:.0f if self.a_pe else 'N/A'} PE_C={self.pe_c:.0f if self.pe_c else 'N/A'} | "
+                     f"open_news={open_news}")
         # Metrics report every 1000 ticks
         if self.tick_count % 1000 == 0:
             self.metrics.report(self.positions.get('cash', 0), self.positions)
