@@ -223,6 +223,15 @@ OPT_T = 0.01
 # Without this: cash PNL +137k but settlement of open positions costs -131k → leaderboard +6k.
 # With this: cash PNL ~+130k, settlement ~0 → leaderboard ~+130k.
 # ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# LIVE PARAMETER RELOAD
+# Bot reads config.json every 500 book updates. If the file exists and has
+# valid JSON, parameters are updated without restart. This lets Claude Code
+# (or a human) tune the bot mid-round by writing to config.json.
+# ═══════════════════════════════════════════════════════════════════════════════
+CONFIG_FILE = "config.json"
+CONFIG_RELOAD_INTERVAL = 500  # check every N book updates
+
 ROUND_TICKS         = 4500   # total exchange ticks per round
 FLATTEN_START_TICK  = 3600   # 80% — start reducing soft limits progressively
 FLATTEN_HARD_TICK   = 4200   # 93% — cancel all MM, aggressively cross spreads to flatten
@@ -285,19 +294,23 @@ class Case1Bot(XChangeClient):
     # ─────────────────────────────────────────────────────────────────────────
 
     def best_bid(self, symbol: str):
-        """Return (price, qty) of best bid, or (None, 0)."""
+        """Return (price, qty) of best bid, or (None, 0). Filters zero-qty phantom levels."""
         book = self.order_books.get(symbol)
         if book and book.bids:
-            px = max(book.bids.keys())
-            return px, book.bids[px]
+            valid = [(p, q) for p, q in book.bids.items() if q > 0]
+            if valid:
+                px, qty = max(valid, key=lambda x: x[0])
+                return px, qty
         return None, 0
 
     def best_ask(self, symbol: str):
-        """Return (price, qty) of best ask, or (None, 0)."""
+        """Return (price, qty) of best ask, or (None, 0). Filters zero-qty phantom levels."""
         book = self.order_books.get(symbol)
         if book and book.asks:
-            px = min(book.asks.keys())
-            return px, book.asks[px]
+            valid = [(p, q) for p, q in book.asks.items() if q > 0]
+            if valid:
+                px, qty = min(valid, key=lambda x: x[0])
+                return px, qty
         return None, 0
 
     def mid_price(self, symbol: str):
@@ -547,6 +560,34 @@ class Case1Bot(XChangeClient):
     # MARKET MAKING
     # ─────────────────────────────────────────────────────────────────────────
 
+    def reload_config(self):
+        """
+        Hot-reload parameters from config.json without restart.
+        Only updates globals that exist. Logs every change.
+        Example config.json:
+          {"MM_BASE_EDGE": 2, "MM_SIZE": 8, "SOFT_POS_LIMIT_STOCK": 40}
+        """
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                cfg = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return  # no config file or invalid JSON — silent skip
+
+        tunable = {
+            'MM_BASE_EDGE', 'MM_SIZE', 'MM_LEVELS', 'MM_LEVEL_STEP', 'MM_FADE_FACTOR',
+            'ADAPTIVE_EDGE_MAX', 'ADAPTIVE_EDGE_SCALE',
+            'OBI_STRENGTH', 'OBI_MAX_SKEW',
+            'ETF_ARB_EDGE', 'PCP_ARB_EDGE', 'BOX_ARB_EDGE', 'OPT_SIZE',
+            'SOFT_POS_LIMIT_STOCK', 'SOFT_POS_LIMIT_ETF', 'SOFT_POS_LIMIT_OPT', 'SOFT_POS_LIMIT_FED',
+            'FED_MM_EDGE', 'FED_MM_SIZE',
+        }
+        for key, val in cfg.items():
+            if key in tunable:
+                old = globals().get(key)
+                if old != val:
+                    globals()[key] = val
+                    log.info(f"CONFIG RELOAD: {key} = {val} (was {old})")
+
     def inventory_fade(self, symbol: str) -> float:
         """
         Logarithmic inventory fade: pushes quotes away from inventory direction.
@@ -626,17 +667,12 @@ class Case1Bot(XChangeClient):
         pos = self.positions.get(symbol, 0)
 
         # Determine soft position limit for this symbol
-        if symbol == "ETF":
-            soft_limit = SOFT_POS_LIMIT_ETF
-        else:
-            soft_limit = SOFT_POS_LIMIT_STOCK
+        # Use DYNAMIC soft limit during flattening phase (shrinks toward 0)
+        soft_limit = self.get_dynamic_soft_limit(symbol)
 
-        # ONE-SIDED POSITION GATE: instead of killing ALL quotes at soft limit,
-        # only block the ACCUMULATING side. Keep quoting the REDUCING side so we
-        # can unwind via normal MM flow (not just emergency unwind).
-        # This fixes the "11 buys, 0 sells, dead at limit" problem.
-        allow_buy = pos < soft_limit          # block buys at/past soft limit
-        allow_sell = pos > -soft_limit        # block sells at/past negative soft limit
+        # ONE-SIDED POSITION GATE: only block the ACCUMULATING side.
+        allow_buy = pos < soft_limit
+        allow_sell = pos > -soft_limit
 
         # At 80% of limit: also tighten the reducing side's edge for faster unwind
         hard_stop_long  = 0.8 * soft_limit
@@ -670,8 +706,9 @@ class Case1Bot(XChangeClient):
             offset = edge + level * MM_LEVEL_STEP
             size = max(1, MM_SIZE - level * 2)
 
-            # Bid (buy) side
-            bid_px = int(round(adjusted_fair - offset))
+            # Bid (buy) side — tighter edge when unwinding short position
+            bid_offset = offset * reducing_edge_mult if pos < 0 else offset
+            bid_px = int(round(adjusted_fair - bid_offset))
             if allow_buy and bid_px > 0:
                 await self.safe_place(symbol, size, "buy", bid_px)
 
@@ -681,24 +718,8 @@ class Case1Bot(XChangeClient):
             if allow_sell and ask_px > 0:
                 await self.safe_place(symbol, size, "sell", ask_px)
 
-        # Emergency unwind: if position exceeds 70% of soft limit, aggressively flatten.
-        # Cross the spread: sell at best_bid (guaranteed fill), buy at best_ask (guaranteed fill).
-        emergency_threshold = 0.7 * soft_limit
-        if abs(pos) > emergency_threshold:
-            bb, _ = self.best_bid(symbol)
-            ba, _ = self.best_ask(symbol)
-            mid = self.mid_price(symbol)
-            if mid:
-                unwind_size = min(5, int(abs(pos) - emergency_threshold) + 5)
-                unwind_size = min(unwind_size, abs(pos))
-                if pos > emergency_threshold:
-                    # Too long — sell at best_bid to guarantee immediate fill (cross the spread)
-                    sell_px = int(bb) if bb is not None else int(mid - 1)
-                    await self.safe_place(symbol, unwind_size, "sell", sell_px)
-                elif pos < -emergency_threshold:
-                    # Too short — buy at best_ask to guarantee immediate fill (cross the spread)
-                    buy_px = int(ba) if ba is not None else int(mid + 1)
-                    await self.safe_place(symbol, unwind_size, "buy", buy_px)
+        # Note: emergency unwind is handled in bot_handle_book_update at 60% threshold.
+        # requote_mm only fires when position is BELOW that threshold, so no emergency logic needed here.
 
     # ─────────────────────────────────────────────────────────────────────────
     # FED PREDICTION MARKET QUOTING
@@ -1142,13 +1163,12 @@ class Case1Bot(XChangeClient):
         in_gentle = (etick >= FLATTEN_START_TICK) or (elapsed_sec >= 720)   # 80% = 12:00
 
         if in_stop:
-            # Last 30 sec: ONLY flatten, no new quotes at all
-            if self.tick_count % 5 == 0:
-                await self.flatten_all_positions(aggressive=True)
+            # Last 30 sec: ONLY flatten, EVERY tick, maximum urgency
+            await self.flatten_all_positions(aggressive=True)
             return
         elif in_hard:
-            # 14:00-14:30: aggressive flatten + no new MM quotes
-            if self.tick_count % 3 == 0:
+            # 14:00-14:30: aggressive flatten every 2 ticks, no new MM
+            if self.tick_count % 2 == 0:
                 await self.flatten_all_positions(aggressive=True)
             return
         elif in_gentle:
@@ -1208,6 +1228,10 @@ class Case1Bot(XChangeClient):
         # Periodically blend in market fed prices
         if self.tick_count % 20 == 0:
             self.update_fed_from_market()
+
+        # Live parameter reload from config.json
+        if self.tick_count % CONFIG_RELOAD_INTERVAL == 0:
+            self.reload_config()
 
         # Periodic status log + metrics snapshot
         if self.tick_count % 200 == 0:
