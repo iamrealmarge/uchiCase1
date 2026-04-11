@@ -190,7 +190,7 @@ MAX_OUTSTANDING_VOL  = 120   # per symbol
 MAX_ABS_POSITION     = 200   # per symbol
 
 # Position limits (self-imposed — TIGHT to prevent accumulation)
-SOFT_POS_LIMIT_STOCK = 30   # defensive: tighter to prevent adverse selection accumulation
+SOFT_POS_LIMIT_STOCK = 45   # allow size-40 news trades + small MM buffer
 SOFT_POS_LIMIT_ETF   = 15   # defensive: tighter ETF limit
 SOFT_POS_LIMIT_OPT   = 20   # was 30
 SOFT_POS_LIMIT_FED   = 20   # was 30 — tightened to prevent Fed symbol accumulation
@@ -801,15 +801,15 @@ class Case1Bot(XChangeClient):
                     # Fair went up: buy at best_ask (take stale offer)
                     ba, _ = self.best_ask(asset)
                     if ba:
-                        await self.safe_place(asset, 20, "buy", ba)
-                        self.news_positions[asset] = ("BUY", 20, now, ba)
+                        await self.safe_place(asset, 40, "buy", ba)
+                        self.news_positions[asset] = ("BUY", 40, now, ba)
                         log.info(f"NEWS TRADE: BUY {asset} x20 @ {ba} (edge={edge:+.1f})")
                 else:
                     # Fair went down: sell at best_bid (take stale bid)
                     bb, _ = self.best_bid(asset)
                     if bb:
-                        await self.safe_place(asset, 20, "sell", bb)
-                        self.news_positions[asset] = ("SELL", 20, now, bb)
+                        await self.safe_place(asset, 40, "sell", bb)
+                        self.news_positions[asset] = ("SELL", 40, now, bb)
                         log.info(f"NEWS TRADE: SELL {asset} x20 @ {bb} (edge={edge:+.1f})")
 
                 # If A or C earnings and edge > 10, also trade ETF in same direction
