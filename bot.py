@@ -272,6 +272,11 @@ class Case1Bot(XChangeClient):
         # ── Startup: cancel stale orders on first book update ──
         self.startup_cancel_done = False
 
+        # ── Trade flow tracking (adverse selection + volatility) ──
+        self.recent_trades = {}     # symbol → list of (price, qty, is_buy) last 20 trades
+        self.adverse_score = {}     # symbol → float (0=safe, 1=toxic)
+        self.recent_mids = {}       # symbol → list of last 30 mid prices for vol estimation
+
         # ── Petition state (Fed proxy) ──
         self.petition_cumulative = {}  # asset → cumulative signatures
 
@@ -601,15 +606,21 @@ class Case1Bot(XChangeClient):
 
     def adaptive_edge(self, symbol: str) -> float:
         """
-        Adaptive spread (Cycle 22): tanh formula widens edge with inventory.
-        At pos=0: returns MM_BASE_EDGE (tightest spread for max fills)
-        At pos=soft_limit: returns MM_BASE_EDGE + ADAPTIVE_EDGE_MAX (widest spread, max PNL/fill)
-        Formula: edge = MM_BASE_EDGE + ADAPTIVE_EDGE_MAX * tanh(|pos| / ADAPTIVE_EDGE_SCALE)
-        This means we earn MORE per fill when inventory is building (compensating for risk),
-        and compete more aggressively for fills when we're balanced.
+        Adaptive spread driven by THREE signals:
+        1. Inventory (tanh) — wider when we're exposed
+        2. Adverse selection — wider when trade flow is one-sided (informed traders)
+        3. Base edge from config (tunable via config.json)
+
+        This replaces pure inventory-based edge with a regime-aware edge.
         """
         pos = self.positions.get(symbol, 0)
-        return MM_BASE_EDGE + ADAPTIVE_EDGE_MAX * math.tanh(abs(pos) / ADAPTIVE_EDGE_SCALE)
+        # Inventory component: wider with position
+        inv_edge = ADAPTIVE_EDGE_MAX * math.tanh(abs(pos) / ADAPTIVE_EDGE_SCALE)
+        # Adverse selection component: wider when flow is toxic (one-sided)
+        toxicity = self.adverse_score.get(symbol, 0)
+        tox_edge = ADAPTIVE_EDGE_MAX * toxicity  # 0 when balanced, up to ADAPTIVE_EDGE_MAX when all one-sided
+        # Total: base + max of inventory and toxicity signals
+        return MM_BASE_EDGE + max(inv_edge, tox_edge)
 
     def order_book_imbalance_skew(self, symbol: str) -> float:
         """
@@ -842,64 +853,58 @@ class Case1Bot(XChangeClient):
 
     async def check_etf_arb(self):
         """
-        Compare ETF market price vs NAV.
-        Use swaps for clean execution (no leg risk).
+        ETF arb using EXECUTABLE bid/ask economics.
+        Swap is decoupled: check if existing positions allow a profitable swap,
+        independent of whether we just placed an order.
         """
         nav = self.fair.get("ETF")
-        etf_mid = self.mid_price("ETF")
-        if nav is None or etf_mid is None:
+        if nav is None:
             return
 
-        edge = etf_mid - nav  # positive = ETF overpriced
+        etf_bb, _ = self.best_bid("ETF")
+        etf_ba, _ = self.best_ask("ETF")
+        if etf_bb is None or etf_ba is None:
+            return
 
-        threshold = ETF_SWAP_FEE + ETF_ARB_EDGE
-
-        # Check component positions before swapping — don't blow past soft limits
         a_pos = self.positions.get("A", 0)
         b_pos = self.positions.get("B", 0)
         c_pos = self.positions.get("C", 0)
-        component_room_long = min(
+        etf_pos = self.positions.get("ETF", 0)
+
+        # 1. Check if we can SELL ETF at bid profitably vs NAV
+        sell_edge = etf_bb - nav
+        if sell_edge > ETF_SWAP_FEE + ETF_ARB_EDGE:
+            qty = min(3, self.position_room("ETF", "sell"))
+            if qty > 0:
+                await self.safe_place("ETF", qty, "sell", etf_bb)
+
+        # 2. Check if we can BUY ETF at ask profitably vs NAV
+        buy_edge = nav - etf_ba
+        if buy_edge > ETF_SWAP_FEE + ETF_ARB_EDGE:
+            qty = min(3, self.position_room("ETF", "buy"))
+            if qty > 0:
+                await self.safe_place("ETF", qty, "buy", etf_ba)
+
+        # 3. Decoupled swap: if we hold ETF long AND components have room, redeem
+        component_room = min(
             SOFT_POS_LIMIT_STOCK - a_pos,
             SOFT_POS_LIMIT_STOCK - b_pos,
             SOFT_POS_LIMIT_STOCK - c_pos
         )
-        component_room_short = min(
-            SOFT_POS_LIMIT_STOCK + a_pos,
-            SOFT_POS_LIMIT_STOCK + b_pos,
-            SOFT_POS_LIMIT_STOCK + c_pos
-        )
+        if etf_pos > 0 and component_room > 0:
+            swap_qty = min(etf_pos, 3, component_room)
+            try:
+                await self.place_swap_order("fromETF", swap_qty)
+            except Exception as e:
+                log.warning(f"Swap fromETF failed: {e}")
 
-        if edge > threshold:
-            # ETF overpriced: sell ETF, then redeem (fromETF → gives us +A+B+C)
-            # Only swap if components have room to go MORE long
-            bb, _ = self.best_bid("ETF")
-            if bb is not None and bb - nav > ETF_SWAP_FEE:
-                qty = min(5, self.position_room("ETF", "sell"))
-                if qty > 0:
-                    await self.safe_place("ETF", qty, "sell", bb)
-                    etf_pos = self.positions.get("ETF", 0)
-                    if etf_pos > 0 and component_room_long > 0:
-                        swap_qty = min(etf_pos, 3, component_room_long)
-                        try:
-                            await self.place_swap_order("fromETF", swap_qty)
-                        except Exception as e:
-                            log.warning(f"Swap fromETF failed: {e}")
-
-        elif edge < -threshold:
-            # ETF underpriced: buy ETF, then create (toETF → consumes A+B+C)
-            # Only swap if we hold components
-            ba, _ = self.best_ask("ETF")
-            if ba is not None and nav - ba > ETF_SWAP_FEE:
-                qty = min(5, self.position_room("ETF", "buy"))
-                if qty > 0:
-                    await self.safe_place("ETF", qty, "buy", ba)
-                    can_swap = min(a_pos, b_pos, c_pos)
-                    if can_swap > 0:
-                        swap_qty = min(can_swap, 3)
-                        try:
-                            await self.place_swap_order("toETF", swap_qty)
-                        except Exception as e:
-                            log.warning(f"Swap toETF failed: {e}")
+        # 4. Decoupled swap: if we hold components AND ETF has room, create
+        if min(a_pos, b_pos, c_pos) > 0 and self.position_room("ETF", "buy") > 0:
+            swap_qty = min(a_pos, b_pos, c_pos, 3)
+            try:
+                await self.place_swap_order("toETF", swap_qty)
+            except Exception as e:
+                log.warning(f"Swap toETF failed: {e}")
 
     # ─────────────────────────────────────────────────────────────────────────
     # PUT-CALL PARITY ARBITRAGE
@@ -907,11 +912,11 @@ class Case1Bot(XChangeClient):
 
     async def check_pcp_arb(self):
         """
-        For each strike K with both call and put books:
-          PCP: C - P = S - K * e^(-rT)
-        If violated beyond threshold, arb it.
+        PCP: C - P = S - K * e^(-rT)
+        Only trigger on EXECUTABLE bid/ask economics, not mids.
+        Check if the actual trade (sell call at bid, buy put at ask) is profitable.
         """
-        s_mid = self.fair.get("B") or self.mid_price("B")
+        s_mid = self.mid_price("B")  # use raw market mid, not our PCP-derived fair (avoids circularity)
         if s_mid is None:
             return
 
@@ -919,31 +924,25 @@ class Case1Bot(XChangeClient):
             call_sym = CALL_SYMS[K]
             put_sym = PUT_SYMS[K]
 
-            call_mid = self.mid_price(call_sym)
-            put_mid = self.mid_price(put_sym)
-            if call_mid is None or put_mid is None:
-                continue
+            call_bb, _ = self.best_bid(call_sym)
+            call_ba, _ = self.best_ask(call_sym)
+            put_bb, _ = self.best_bid(put_sym)
+            put_ba, _ = self.best_ask(put_sym)
 
             pcp_rhs = s_mid - K * math.exp(-RISK_FREE * OPT_T)
-            diff = (call_mid - put_mid) - pcp_rhs
 
-            if abs(diff) < PCP_ARB_EDGE:
-                continue
-
-            if diff > PCP_ARB_EDGE:
-                # Call overpriced vs put: sell call, buy put
-                call_bb, _ = self.best_bid(call_sym)
-                put_ba, _ = self.best_ask(put_sym)
-                if call_bb and put_ba:
+            # Check executable arb: sell call at bid, buy put at ask
+            if call_bb and put_ba:
+                executable_edge = (call_bb - put_ba) - pcp_rhs
+                if executable_edge > PCP_ARB_EDGE:
                     await self.safe_place(call_sym, OPT_SIZE, "sell", call_bb)
                     await self.safe_place(put_sym, OPT_SIZE, "buy", put_ba)
                     self.metrics.record_arb()
 
-            elif diff < -PCP_ARB_EDGE:
-                # Put overpriced vs call: buy call, sell put
-                call_ba, _ = self.best_ask(call_sym)
-                put_bb, _ = self.best_bid(put_sym)
-                if call_ba and put_bb:
+            # Check executable arb: buy call at ask, sell put at bid
+            if call_ba and put_bb:
+                executable_edge = pcp_rhs - (call_ba - put_bb)
+                if executable_edge > PCP_ARB_EDGE:
                     await self.safe_place(call_sym, OPT_SIZE, "buy", call_ba)
                     await self.safe_place(put_sym, OPT_SIZE, "sell", put_bb)
                     self.metrics.record_arb()
@@ -1177,6 +1176,15 @@ class Case1Bot(XChangeClient):
                 await self.flatten_all_positions(aggressive=False)
             # Continue to normal MM below with dynamic soft limits
 
+        # Track mid prices for volatility estimation
+        mid = self.mid_price(symbol)
+        if mid:
+            mids = self.recent_mids.get(symbol, [])
+            mids.append(mid)
+            if len(mids) > 30:
+                mids = mids[-30:]
+            self.recent_mids[symbol] = mids
+
         # Recompute fairs (cheap — do it every update)
         self.recompute_all_fairs()
 
@@ -1250,8 +1258,36 @@ class Case1Bot(XChangeClient):
             self.metrics.report(self.positions.get('cash', 0), self.positions)
 
     async def bot_handle_trade_msg(self, symbol: str, price: int, qty: int):
-        """Called when any trade occurs on the exchange (not just ours)."""
-        pass
+        """
+        Track public trade flow for adverse selection detection.
+        A trade at or above the ask = buy aggressor (someone lifting offers).
+        A trade at or below the bid = sell aggressor (someone hitting bids).
+        Sustained one-sided aggression = informed flow = widen spreads.
+        """
+        bb, _ = self.best_bid(symbol)
+        ba, _ = self.best_ask(symbol)
+        mid = self.mid_price(symbol)
+        if mid is None:
+            return
+
+        # Classify as buy or sell aggressor
+        is_buy = price >= mid  # traded at or above mid = buyer aggressive
+
+        # Track last 20 trades per symbol
+        trades = self.recent_trades.get(symbol, [])
+        trades.append((price, qty, is_buy))
+        if len(trades) > 20:
+            trades = trades[-20:]
+        self.recent_trades[symbol] = trades
+
+        # Compute adverse selection score: fraction of volume on one side
+        if len(trades) >= 5:
+            buy_vol = sum(q for _, q, b in trades if b)
+            sell_vol = sum(q for _, q, b in trades if not b)
+            total = buy_vol + sell_vol
+            if total > 0:
+                imbalance = abs(buy_vol - sell_vol) / total  # 0 = balanced, 1 = all one side
+                self.adverse_score[symbol] = imbalance
 
     async def bot_handle_order_fill(self, order_id: str, qty: int, price: int):
         """Called when one of OUR orders gets filled."""
